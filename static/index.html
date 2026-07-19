@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sapiens Playground</title>
+<style>
+  :root {
+    --bg: #0e0f13; --panel: #171922; --panel2: #1f2230;
+    --text: #e8eaf0; --muted: #9aa0b4;
+    --accent: #6ea8fe; --border: #2a2e3f; --ok: #4ade80; --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 22px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+  }
+  header h1 { font-size: 19px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 28px 60px; }
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border: 1.5px dashed var(--border); border-radius: 14px; padding: 36px; min-height: 150px;
+    text-align: center; background: var(--panel); cursor: pointer; transition: .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--panel2); }
+  .drop input { display: none; }
+  .drop .big { font-size: 15px; font-weight: 600; }
+  .drop .small { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .controls { display: flex; gap: 14px; align-items: center; margin: 18px 0; flex-wrap: wrap; }
+  button {
+    background: var(--accent); color: #0b1220; border: 0; padding: 10px 18px;
+    border-radius: 9px; font-weight: 650; cursor: pointer; font-size: 14px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .tasks { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tasks label {
+    display: flex; gap: 6px; align-items: center; background: var(--panel2);
+    padding: 7px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; user-select: none;
+    border: 1px solid var(--border);
+  }
+  .status { color: var(--muted); font-size: 13px; min-height: 18px; }
+  .status.err { color: var(--err); }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 18px; margin-top: 22px;
+  }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .card h3 { margin: 0; padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+  .card h3 .ms { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .card .imgwrap { position: relative; aspect-ratio: 3/4; background: #0a0b0f; display:flex; align-items:center; justify-content:center;}
+  .card img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .card .placeholder { color: var(--muted); font-size: 13px; }
+  .spinner { width: 26px; height: 26px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { color: var(--muted); font-size: 12px; text-align:center; padding: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧍 Sapiens Playground</h1>
+  <span class="sub">Upload a photo of a person — pose, segmentation, depth & normals (Sapiens-0.6B)</span>
+</header>
+<div class="wrap">
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="image/*" />
+    <div class="big">Drop a photo here or click to choose</div>
+    <div class="small">Best with a single, clearly-visible person. JPG/PNG.</div>
+  </label>
+
+  <div class="controls">
+    <div class="tasks" id="tasks">
+      <label><input type="checkbox" value="seg" checked> Segmentation</label>
+      <label><input type="checkbox" value="pose" checked> Pose</label>
+      <label><input type="checkbox" value="depth" checked> Depth</label>
+      <label><input type="checkbox" value="normal" checked> Normals</label>
+    </div>
+    <button id="run" disabled>Run</button>
+    <span class="status" id="status"></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+<footer>Meta Sapiens · local inference on your GPU · <span id="dev">…</span></footer>
+
+<script>
+const CARDS = {
+  input:  "Input",
+  seg:    "Segmentation",
+  pose:   "Pose",
+  depth:  "Depth",
+  normal: "Surface Normals",
+};
+let currentFile = null;
+const $ = s => document.querySelector(s);
+const grid = $("#grid"), statusEl = $("#status"), runBtn = $("#run");
+
+fetch("/api/health").then(r=>r.json()).then(d=>{
+  $("#dev").textContent = d.device + (d.gpu ? " · " + d.gpu : "");
+}).catch(()=>{});
+
+function setStatus(msg, err=false){ statusEl.textContent = msg; statusEl.classList.toggle("err", err); }
+
+const drop = $("#drop"), fileInput = $("#file");
+["dragover","dragenter"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop", ev=>{ if(ev.dataTransfer.files[0]) loadFile(ev.dataTransfer.files[0]); });
+fileInput.addEventListener("change", ()=>{ if(fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+function selectedTasks(){ return [...document.querySelectorAll('#tasks input:checked')].map(c=>c.value); }
+
+function loadFile(f){
+  currentFile = f;
+  runBtn.disabled = false;
+  setStatus(f.name + " ready — click Run");
+  renderCards(true);
+  const url = URL.createObjectURL(f);
+  const c = document.getElementById("card-input");
+  if(c){ c.querySelector(".imgwrap").innerHTML = `<img src="${url}">`; }
+}
+
+function renderCards(reset){
+  const tasks = ["input", ...selectedTasks()];
+  grid.innerHTML = "";
+  for(const t of tasks){
+    const div = document.createElement("div");
+    div.className = "card"; div.id = "card-"+t;
+    div.innerHTML = `<h3>${CARDS[t]||t}<span class="ms" id="ms-${t}"></span></h3>
+      <div class="imgwrap"><span class="placeholder">—</span></div>`;
+    grid.appendChild(div);
+  }
+  if(currentFile){
+    const url = URL.createObjectURL(currentFile);
+    grid.querySelector("#card-input .imgwrap").innerHTML = `<img src="${url}">`;
+  }
+}
+
+document.getElementById("tasks").addEventListener("change", ()=>{ if(currentFile) renderCards(); });
+
+runBtn.addEventListener("click", async ()=>{
+  if(!currentFile) return;
+  const tasks = selectedTasks();
+  if(!tasks.length){ setStatus("Pick at least one task", true); return; }
+  runBtn.disabled = true;
+  renderCards();
+  for(const t of tasks){
+    const w = grid.querySelector(`#card-${t} .imgwrap`);
+    if(w) w.innerHTML = `<div class="spinner"></div>`;
+  }
+  setStatus("Running inference…");
+  const fd = new FormData();
+  fd.append("image", currentFile);
+  fd.append("tasks", tasks.join(","));
+  try {
+    const t0 = performance.now();
+    const res = await fetch("/api/infer", { method:"POST", body: fd });
+    if(!res.ok){ throw new Error(await res.text()); }
+    const data = await res.json();
+    for(const t of tasks){
+      const w = grid.querySelector(`#card-${t} .imgwrap`);
+      const ms = document.getElementById("ms-"+t);
+      if(data.results[t]){
+        w.innerHTML = `<img src="${data.results[t]}">`;
+        if(ms && data.timings && data.timings[t]!=null) ms.textContent = data.timings[t]+" ms";
+      } else {
+        w.innerHTML = `<span class="placeholder">failed</span>`;
+      }
+    }
+    setStatus(`Done in ${((performance.now()-t0)/1000).toFixed(1)}s`);
+  } catch(e){
+    setStatus("Error: " + e.message, true);
+    for(const t of tasks){
+      const w = grid.querySelector(`#card-${t} .imgwrap`);
+      if(w) w.innerHTML = `<span class="placeholder">error</span>`;
+    }
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

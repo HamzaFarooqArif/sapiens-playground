@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Local model cache is NOT committed (checkpoints are ~10GB, pulled from HuggingFace)
+# Run `python download_models.py` after cloning.
+
+# Test / scratch outputs
+out_*.png
+full_*.png
+stand_*.png
+sample.jpg
+sample_*.jpg
+server.log
+server.err
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/launch.json
+
+# Claude Code local files
+.claude/
