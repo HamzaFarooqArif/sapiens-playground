@@ -23,11 +23,15 @@ python -m venv .venv
 # 2. Download the Sapiens-0.6B checkpoints from HuggingFace (~5 GB, one-time)
 .\.venv\Scripts\python.exe download_models.py
 
-# 3. Start the app
-.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000
+# 3. Start the app (auto-picks a free port if 8000 is busy)
+.\.venv\Scripts\python.exe run.py
 ```
 
-Then open <http://127.0.0.1:8000>, drop in a photo, and click **Run**.
+The console prints the URL, e.g. `http://127.0.0.1:8000` (or the next free port
+if 8000 is taken). Open it, drop in a photo, and click **Run**.
+
+Options: `python run.py --port 8080` (preferred port), `--host 0.0.0.0` (LAN
+access), `--reload` (dev auto-reload).
 
 The first run of each task also downloads a person detector
 (torchvision Faster R-CNN, ~170 MB) used for top-down pose.
@@ -44,6 +48,7 @@ The first run of each task also downloads a person detector
 
 | File | Purpose |
 |------|---------|
+| `run.py` | Launcher — starts the app, auto-selecting a free port |
 | `app.py` | FastAPI server + upload API |
 | `sapiens_infer.py` | Preprocessing, model manager, the four task postprocessors, pose decoding |
 | `download_models.py` | Resolves/downloads the 0.6B checkpoints from HuggingFace |
