@@ -2,12 +2,14 @@
 from __future__ import annotations
 import base64
 import io
+import json
+import time
 import threading
 
 import numpy as np
 from PIL import Image, ImageOps
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import sapiens_infer as S
@@ -43,9 +45,11 @@ def health():
 
 @app.post("/api/infer")
 async def infer(image: UploadFile = File(...), tasks: str = Form("seg,pose,depth,normal")):
+    """Stream results as newline-delimited JSON, one line per task as its model
+    finishes, so each output appears in the UI the moment it is ready."""
     data = await image.read()
     try:
-        rgb = _read_rgb(data)
+        rgb = _read_rgb(data)                 # decode once, up front (errors -> 400)
     except Exception as e:
         raise HTTPException(400, f"Could not read image: {e}")
 
@@ -53,18 +57,22 @@ async def infer(image: UploadFile = File(...), tasks: str = Form("seg,pose,depth
     if not task_list:
         raise HTTPException(400, "No valid tasks requested.")
 
-    with _LOCK:
-        try:
-            results = S.infer(rgb, task_list)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(500, f"Inference failed: {e}")
+    def stream():
+        # Serialize across requests: one GPU, one model resident at a time.
+        with _LOCK:
+            for task in task_list:
+                try:
+                    t0 = time.time()
+                    out = S.TASKS[task](rgb)
+                    ms = int((time.time() - t0) * 1000)
+                    msg = {"task": task, "image": _to_data_uri(out), "ms": ms}
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    msg = {"task": task, "error": str(e)}
+                yield json.dumps(msg) + "\n"
 
-    return JSONResponse({
-        "results": {t: _to_data_uri(img) for t, (img, _ms) in results.items()},
-        "timings": {t: ms for t, (_img, ms) in results.items()},
-    })
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
 @app.get("/")

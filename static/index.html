@@ -159,17 +159,37 @@ runBtn.addEventListener("click", async ()=>{
     const t0 = performance.now();
     const res = await fetch("/api/infer", { method:"POST", body: fd });
     if(!res.ok){ throw new Error(await res.text()); }
-    const data = await res.json();
-    for(const t of tasks){
-      const w = grid.querySelector(`#card-${t} .imgwrap`);
-      const ms = document.getElementById("ms-"+t);
-      if(data.results[t]){
-        w.innerHTML = `<img src="${data.results[t]}">`;
-        if(ms && data.timings && data.timings[t]!=null) ms.textContent = data.timings[t]+" ms";
+
+    // Stream newline-delimited JSON: render each card the moment its line lands.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "", doneCount = 0;
+    const applyLine = (line) => {
+      if(!line.trim()) return;
+      const msg = JSON.parse(line);
+      const w = grid.querySelector(`#card-${msg.task} .imgwrap`);
+      const ms = document.getElementById("ms-"+msg.task);
+      if(!w) return;
+      if(msg.image){
+        w.innerHTML = `<img src="${msg.image}">`;
+        if(ms && msg.ms!=null) ms.textContent = msg.ms+" ms";
       } else {
-        w.innerHTML = `<span class="placeholder">failed</span>`;
+        w.innerHTML = `<span class="placeholder">${msg.error ? "error" : "failed"}</span>`;
+      }
+      doneCount++;
+      setStatus(`Received ${doneCount}/${tasks.length}…`);
+    };
+    while(true){
+      const { done, value } = await reader.read();
+      if(done) break;
+      buf += decoder.decode(value, { stream:true });
+      let idx;
+      while((idx = buf.indexOf("\n")) >= 0){
+        applyLine(buf.slice(0, idx));
+        buf = buf.slice(idx + 1);
       }
     }
+    if(buf.trim()) applyLine(buf);   // flush any tail without trailing newline
     setStatus(`Done in ${((performance.now()-t0)/1000).toFixed(1)}s`);
   } catch(e){
     setStatus("Error: " + e.message, true);
