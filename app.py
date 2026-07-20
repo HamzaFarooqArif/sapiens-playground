@@ -43,13 +43,15 @@ def health():
     return {
         "device": S.DEVICE,
         "gpu": S.gpu_name(),
-        "normal_size": S.NORMAL_SIZE,
-        "normal_fp16": "normal" in S.HALF_TASKS,
+        "normal_size": S.NORMAL_SIZE,               # default / launch size
+        "normal_sizes": S.available_normal_sizes(),  # sizes downloaded & selectable
     }
 
 
 @app.post("/api/infer")
-async def infer(image: UploadFile = File(...), tasks: str = Form("seg,pose,depth,normal")):
+async def infer(image: UploadFile = File(...),
+                tasks: str = Form("seg,pose,depth,normal"),
+                normal_size: str = Form("")):
     """Stream results as newline-delimited JSON, one line per task as its model
     finishes, so each output appears in the UI the moment it is ready."""
     data = await image.read()
@@ -62,13 +64,15 @@ async def infer(image: UploadFile = File(...), tasks: str = Form("seg,pose,depth
     if not task_list:
         raise HTTPException(400, "No valid tasks requested.")
 
+    nsize = normal_size.strip() or None
+
     def stream():
         # Serialize across requests: one GPU, one model resident at a time.
         with _LOCK:
             for task in task_list:
                 try:
                     t0 = time.time()
-                    out = S.TASKS[task](rgb)
+                    out = S.run_task(task, rgb, nsize)
                     ms = int((time.time() - t0) * 1000)
                     msg = {"task": task, "image": _to_data_uri(out), "ms": ms}
                 except Exception as e:

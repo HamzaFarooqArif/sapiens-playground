@@ -23,7 +23,8 @@ import cv2
 import torch
 import torch.nn.functional as F
 
-from download_models import resolve as resolve_checkpoint, NORMAL_SIZE
+from download_models import (resolve as resolve_checkpoint, resolve_normal,
+                             NORMAL_SIZE, NORMAL_CHECKPOINTS, available_normal_sizes)
 from goliath_consts import GOLIATH_KEYPOINTS, GOLIATH_SKELETON_INFO, GOLIATH_KPTS_COLORS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -31,9 +32,15 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # Heavier models (esp. normals-2b, ~8 GB in fp32) won't fit in 8 GB VRAM.
 # Run them in fp16 to roughly halve the footprint. Auto-on for 2b; overridable.
 _fp16_env = os.environ.get("SAPIENS_NORMAL_FP16")
-NORMAL_FP16 = (_fp16_env == "1") if _fp16_env is not None else (NORMAL_SIZE == "2b")
-# Tasks whose model runs in half precision (only meaningful on CUDA).
-HALF_TASKS = {"normal"} if (NORMAL_FP16 and DEVICE == "cuda") else set()
+
+
+def normal_is_half(size: str) -> bool:
+    """Whether to run a given normals size in fp16 (only meaningful on CUDA)."""
+    if DEVICE != "cuda":
+        return False
+    if _fp16_env is not None:
+        return _fp16_env == "1"
+    return size == "2b"   # 2b won't fit 8 GB in fp32
 
 # Preprocessing constants (shared by all four tasks)
 INPUT_H, INPUT_W = 1024, 768
@@ -70,19 +77,34 @@ KPT_NAME_TO_IDX = {name: i for i, name in enumerate(GOLIATH_KEYPOINTS)}
 class ModelManager:
     def __init__(self):
         self._models: dict[str, torch.jit.ScriptModule] = {}
+        self._half: dict[str, bool] = {}
         self._detector = None
         self._gpu_key: str | None = None
 
-    def _load_sapiens(self, task: str):
-        if task not in self._models:
-            path = resolve_checkpoint(task)
-            half = task in HALF_TASKS
-            print(f"[load] {task}{' (fp16)' if half else ''}: {path}", flush=True)
+    @staticmethod
+    def _resolve(key: str) -> tuple[str, bool]:
+        """Map a model key to (checkpoint_path, run_in_fp16).
+
+        Keys are the task name ("seg"/"pose"/"depth") or "normal-<size>".
+        """
+        if key.startswith("normal-"):
+            size = key.split("-", 1)[1]
+            return resolve_normal(size), normal_is_half(size)
+        return resolve_checkpoint(key), False
+
+    def _load_sapiens(self, key: str):
+        if key not in self._models:
+            path, half = self._resolve(key)
+            print(f"[load] {key}{' (fp16)' if half else ''}: {path}", flush=True)
             model = torch.jit.load(path, map_location="cpu").eval()
             if half:
                 model = model.half()
-            self._models[task] = model
-        return self._models[task]
+            self._models[key] = model
+            self._half[key] = half
+        return self._models[key]
+
+    def is_half(self, key: str) -> bool:
+        return self._half.get(key, False)
 
     def _load_detector(self):
         if self._detector is None:
@@ -129,10 +151,10 @@ def preprocess(rgb: np.ndarray) -> torch.Tensor:
 
 
 @torch.inference_mode()
-def _run(task: str, rgb: np.ndarray) -> torch.Tensor:
-    model = MANAGER.on_gpu(task)
+def _run(key: str, rgb: np.ndarray) -> torch.Tensor:
+    model = MANAGER.on_gpu(key)
     x = preprocess(rgb).to(DEVICE)
-    if task in HALF_TASKS:
+    if MANAGER.is_half(key):
         x = x.half()
     out = model(x)
     if isinstance(out, (list, tuple)):
@@ -177,9 +199,10 @@ def run_depth(rgb: np.ndarray) -> np.ndarray:
 
 
 @torch.inference_mode()
-def run_normal(rgb: np.ndarray) -> np.ndarray:
+def run_normal(rgb: np.ndarray, size: str | None = None) -> np.ndarray:
+    size = size if size in NORMAL_CHECKPOINTS else NORMAL_SIZE
     h, w = rgb.shape[:2]
-    out = _run("normal", rgb)                        # [1,3,1024,768]
+    out = _run(f"normal-{size}", rgb)                # [1,3,1024,768]
     nm = F.interpolate(out, size=(h, w), mode="bilinear", align_corners=False)
     nm = nm[0].numpy().transpose(1, 2, 0)            # (h,w,3)
     norm = np.linalg.norm(nm, axis=-1, keepdims=True)
@@ -268,14 +291,21 @@ TASKS = {
 }
 
 
-def infer(rgb: np.ndarray, tasks: list[str]) -> dict:
+def run_task(task: str, rgb: np.ndarray, normal_size: str | None = None) -> np.ndarray:
+    """Dispatch one task. `normal_size` selects the normals model (0.6b/1b/2b)."""
+    if task == "normal":
+        return run_normal(rgb, normal_size)
+    return TASKS[task](rgb)
+
+
+def infer(rgb: np.ndarray, tasks: list[str], normal_size: str | None = None) -> dict:
     """Run the requested tasks. Returns {task: (rgb_result, elapsed_ms)}."""
     results = {}
     for task in tasks:
         if task not in TASKS:
             continue
         t0 = time.time()
-        results[task] = (TASKS[task](rgb), int((time.time() - t0) * 1000))
+        results[task] = (run_task(task, rgb, normal_size), int((time.time() - t0) * 1000))
     return results
 
 

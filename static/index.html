@@ -43,6 +43,14 @@
     padding: 7px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; user-select: none;
     border: 1px solid var(--border);
   }
+  .nsize {
+    display: flex; gap: 7px; align-items: center; font-size: 13px; color: var(--muted);
+  }
+  .nsize.disabled { opacity: .4; pointer-events: none; }
+  .nsize select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 9px; font-size: 13px; cursor: pointer;
+  }
   .status { color: var(--muted); font-size: 13px; min-height: 18px; }
   .status.err { color: var(--err); }
   .grid {
@@ -79,6 +87,10 @@
       <label><input type="checkbox" value="depth" checked> Depth</label>
       <label><input type="checkbox" value="normal" checked> Normals</label>
     </div>
+    <label class="nsize" id="nsizeWrap" title="Normals model size">
+      Normals model
+      <select id="nsize"></select>
+    </label>
     <button id="run" disabled>Run</button>
     <span class="status" id="status"></span>
   </div>
@@ -99,10 +111,27 @@ let currentFile = null;
 const $ = s => document.querySelector(s);
 const grid = $("#grid"), statusEl = $("#status"), runBtn = $("#run");
 
+const nsizeSel = $("#nsize"), nsizeWrap = $("#nsizeWrap");
+
 fetch("/api/health").then(r=>r.json()).then(d=>{
-  const nrm = d.normal_size ? ` · normals: ${d.normal_size}${d.normal_fp16 ? " (fp16)" : ""}` : "";
-  $("#dev").textContent = d.device + (d.gpu ? " · " + d.gpu : "") + nrm;
+  $("#dev").textContent = d.device + (d.gpu ? " · " + d.gpu : "");
+  // Populate the normals-size dropdown with locally-available sizes.
+  const sizes = (d.normal_sizes && d.normal_sizes.length) ? d.normal_sizes : [d.normal_size];
+  nsizeSel.innerHTML = "";
+  for(const s of sizes){
+    const o = document.createElement("option");
+    o.value = s; o.textContent = s.toUpperCase() + (s === "2b" ? " (fp16)" : "");
+    if(s === d.normal_size) o.selected = true;
+    nsizeSel.appendChild(o);
+  }
+  updateNsizeState();
 }).catch(()=>{});
+
+// Enable the dropdown only when the Normals task is checked.
+function updateNsizeState(){
+  const on = [...document.querySelectorAll('#tasks input')].some(c=>c.value==="normal" && c.checked);
+  nsizeWrap.classList.toggle("disabled", !on);
+}
 
 function setStatus(msg, err=false){ statusEl.textContent = msg; statusEl.classList.toggle("err", err); }
 
@@ -140,7 +169,7 @@ function renderCards(reset){
   }
 }
 
-document.getElementById("tasks").addEventListener("change", ()=>{ if(currentFile) renderCards(); });
+document.getElementById("tasks").addEventListener("change", ()=>{ updateNsizeState(); if(currentFile) renderCards(); });
 
 runBtn.addEventListener("click", async ()=>{
   if(!currentFile) return;
@@ -156,6 +185,7 @@ runBtn.addEventListener("click", async ()=>{
   const fd = new FormData();
   fd.append("image", currentFile);
   fd.append("tasks", tasks.join(","));
+  fd.append("normal_size", nsizeSel.value || "");
   try {
     const t0 = performance.now();
     const res = await fetch("/api/infer", { method:"POST", body: fd });

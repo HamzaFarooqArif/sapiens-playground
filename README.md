@@ -50,10 +50,11 @@ selectable — `0.6b` (default), `1b`, or `2b`:
 .\.venv\Scripts\python.exe run.py --normal-size 2b
 ```
 
-(You can also set the `SAPIENS_NORMAL_SIZE` env var instead of the flag.) The
-active size is shown in the page footer. On an 8 GB card: **1B** runs in fp32
-(~6 GB VRAM), and **2B** is run automatically in **fp16** (~7 GB VRAM) so it
-fits — override with `SAPIENS_NORMAL_FP16=0`/`1`.
+(You can also set the `SAPIENS_NORMAL_SIZE` env var instead of the flag.) Once a
+size is downloaded it also appears in the **Normals model** dropdown in the web
+UI, so you can switch between sizes per-run without restarting. On an 8 GB card:
+**1B** runs in fp32 (~6 GB VRAM), and **2B** is run automatically in **fp16**
+(~7 GB VRAM) so it fits — override with `SAPIENS_NORMAL_FP16=0`/`1`.
 
 ## Notes
 

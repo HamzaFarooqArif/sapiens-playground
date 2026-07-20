@@ -47,6 +47,22 @@ def resolve_normal(size: str) -> str:
     return hf_hub_download(repo_id=repo_id, filename=filename)
 
 
+def is_normal_cached(size: str) -> bool:
+    """True if the normals checkpoint for `size` is already in the local HF cache."""
+    repo_id, filename = NORMAL_CHECKPOINTS[size]
+    try:
+        hf_hub_download(repo_id=repo_id, filename=filename, local_files_only=True)
+        return True
+    except Exception:
+        return False
+
+
+def available_normal_sizes() -> list:
+    """Normals sizes present locally (so the UI only offers ones that won't
+    trigger a multi-GB download mid-request)."""
+    return [s for s in NORMAL_CHECKPOINTS if is_normal_cached(s)]
+
+
 def download_all(all_normal: bool = False) -> dict:
     paths = {}
     for task in MODELS:
