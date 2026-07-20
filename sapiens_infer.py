@@ -1,6 +1,8 @@
-"""Minimal, VRAM-safe inference harness for Meta Sapiens-0.6B TorchScript models.
+"""Minimal, VRAM-safe inference harness for Meta Sapiens TorchScript models.
 
 Tasks: body-part segmentation, 2D pose (Goliath 308 kpts), depth, surface normals.
+Seg/pose/depth use the 0.6B checkpoints; normals is selectable (0.6b/1b/2b) via
+SAPIENS_NORMAL_SIZE, with 2b run in fp16 so it fits an 8 GB card.
 
 Design notes
 ------------
@@ -14,16 +16,24 @@ Design notes
   is cropped + resized and fed to the pose model, whose heatmaps we decode.
 """
 from __future__ import annotations
+import os
 import time
 import numpy as np
 import cv2
 import torch
 import torch.nn.functional as F
 
-from download_models import resolve as resolve_checkpoint
+from download_models import resolve as resolve_checkpoint, NORMAL_SIZE
 from goliath_consts import GOLIATH_KEYPOINTS, GOLIATH_SKELETON_INFO, GOLIATH_KPTS_COLORS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Heavier models (esp. normals-2b, ~8 GB in fp32) won't fit in 8 GB VRAM.
+# Run them in fp16 to roughly halve the footprint. Auto-on for 2b; overridable.
+_fp16_env = os.environ.get("SAPIENS_NORMAL_FP16")
+NORMAL_FP16 = (_fp16_env == "1") if _fp16_env is not None else (NORMAL_SIZE == "2b")
+# Tasks whose model runs in half precision (only meaningful on CUDA).
+HALF_TASKS = {"normal"} if (NORMAL_FP16 and DEVICE == "cuda") else set()
 
 # Preprocessing constants (shared by all four tasks)
 INPUT_H, INPUT_W = 1024, 768
@@ -66,8 +76,12 @@ class ModelManager:
     def _load_sapiens(self, task: str):
         if task not in self._models:
             path = resolve_checkpoint(task)
-            print(f"[load] {task}: {path}", flush=True)
-            self._models[task] = torch.jit.load(path, map_location="cpu").eval()
+            half = task in HALF_TASKS
+            print(f"[load] {task}{' (fp16)' if half else ''}: {path}", flush=True)
+            model = torch.jit.load(path, map_location="cpu").eval()
+            if half:
+                model = model.half()
+            self._models[task] = model
         return self._models[task]
 
     def _load_detector(self):
@@ -118,6 +132,8 @@ def preprocess(rgb: np.ndarray) -> torch.Tensor:
 def _run(task: str, rgb: np.ndarray) -> torch.Tensor:
     model = MANAGER.on_gpu(task)
     x = preprocess(rgb).to(DEVICE)
+    if task in HALF_TASKS:
+        x = x.half()
     out = model(x)
     if isinstance(out, (list, tuple)):
         out = out[0]

@@ -40,7 +40,12 @@ def _to_data_uri(rgb: np.ndarray) -> str:
 
 @app.get("/api/health")
 def health():
-    return {"device": S.DEVICE, "gpu": S.gpu_name()}
+    return {
+        "device": S.DEVICE,
+        "gpu": S.gpu_name(),
+        "normal_size": S.NORMAL_SIZE,
+        "normal_fp16": "normal" in S.HALF_TASKS,
+    }
 
 
 @app.post("/api/infer")

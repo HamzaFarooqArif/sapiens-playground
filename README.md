@@ -36,6 +36,25 @@ access), `--reload` (dev auto-reload).
 The first run of each task also downloads a person detector
 (torchvision Faster R-CNN, ~170 MB) used for top-down pose.
 
+### Heavier normals model
+
+Seg / pose / depth use the 0.6B checkpoints. The **normals** model size is
+selectable — `0.6b` (default), `1b`, or `2b`:
+
+```powershell
+# Download the heavier normals checkpoints (1B ~4 GB, 2B ~8 GB)
+.\.venv\Scripts\python.exe download_models.py --all-normal
+
+# Run with a larger normals model
+.\.venv\Scripts\python.exe run.py --normal-size 1b
+.\.venv\Scripts\python.exe run.py --normal-size 2b
+```
+
+(You can also set the `SAPIENS_NORMAL_SIZE` env var instead of the flag.) The
+active size is shown in the page footer. On an 8 GB card: **1B** runs in fp32
+(~6 GB VRAM), and **2B** is run automatically in **fp16** (~7 GB VRAM) so it
+fits — override with `SAPIENS_NORMAL_FP16=0`/`1`.
+
 ## Notes
 
 - **First inference is slow** — checkpoints load from disk into RAM and get JIT-warmed.
@@ -51,6 +70,6 @@ The first run of each task also downloads a person detector
 | `run.py` | Launcher — starts the app, auto-selecting a free port |
 | `app.py` | FastAPI server + upload API |
 | `sapiens_infer.py` | Preprocessing, model manager, the four task postprocessors, pose decoding |
-| `download_models.py` | Resolves/downloads the 0.6B checkpoints from HuggingFace |
+| `download_models.py` | Resolves/downloads checkpoints from HuggingFace (selectable normals size) |
 | `goliath_consts.py` | Goliath keypoint names, colors, and skeleton (from ibaiGorordo/Sapiens-Pytorch-Inference) |
 | `static/index.html` | Web UI |

@@ -8,8 +8,10 @@ Usage:
     python run.py --port 8080      # try 8080 first
     python run.py --host 0.0.0.0   # bind all interfaces (LAN access)
     python run.py --reload         # dev auto-reload
+    python run.py --normal-size 1b # use the heavier 1B normals model (0.6b/1b/2b)
 """
 import argparse
+import os
 import socket
 import uvicorn
 
@@ -39,7 +41,13 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000, help="preferred port (default 8000)")
     ap.add_argument("--reload", action="store_true", help="enable dev auto-reload")
+    ap.add_argument("--normal-size", choices=["0.6b", "1b", "2b"],
+                    help="normals model size (default 0.6b; 2b runs in fp16 to fit 8GB)")
     args = ap.parse_args()
+
+    # Must be set before the app imports sapiens_infer / download_models.
+    if args.normal_size:
+        os.environ["SAPIENS_NORMAL_SIZE"] = args.normal_size
 
     port = find_free_port(args.host, args.port)
     if port != args.port:

@@ -100,7 +100,8 @@ const $ = s => document.querySelector(s);
 const grid = $("#grid"), statusEl = $("#status"), runBtn = $("#run");
 
 fetch("/api/health").then(r=>r.json()).then(d=>{
-  $("#dev").textContent = d.device + (d.gpu ? " · " + d.gpu : "");
+  const nrm = d.normal_size ? ` · normals: ${d.normal_size}${d.normal_fp16 ? " (fp16)" : ""}` : "";
+  $("#dev").textContent = d.device + (d.gpu ? " · " + d.gpu : "") + nrm;
 }).catch(()=>{});
 
 function setStatus(msg, err=false){ statusEl.textContent = msg; statusEl.classList.toggle("err", err); }
